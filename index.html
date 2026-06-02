@@ -284,6 +284,58 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
   .landing h1{font-size:28px;}
   .tab-btn{font-size:10px;padding:8px 4px;}
 }
+
+/* PDF SAVE BUTTON */
+.save-pdf-btn{padding:5px 12px;background:transparent;border:1px solid rgba(0,230,118,.4);border-radius:4px;color:var(--green);cursor:pointer;font-size:11px;font-family:'JetBrains Mono',monospace;transition:all .15s;display:none;}
+.save-pdf-btn:hover{background:var(--green-dim);border-color:var(--green);}
+
+/* MANUAL MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px);}
+.modal-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:560px;width:100%;max-height:90vh;overflow-y:auto;}
+.modal-title{font-size:14px;font-weight:700;color:var(--white);margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;}
+.modal-sub{font-size:11px;color:var(--muted);margin-bottom:20px;line-height:1.5;}
+.modal-section{font-size:10px;color:var(--blue);letter-spacing:.12em;text-transform:uppercase;margin:16px 0 8px;font-weight:700;}
+.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;}
+.field-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:4px;}
+.field-single{margin-bottom:10px;}
+.field-label{font-size:10px;color:var(--muted);margin-bottom:4px;letter-spacing:.06em;}
+.field-input{width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--white);font-size:13px;font-family:'JetBrains Mono',monospace;outline:none;transition:border-color .2s;}
+.field-input:focus{border-color:rgba(64,196,255,.5);}
+.field-input::placeholder{color:var(--muted);opacity:.6;}
+.field-select{width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--white);font-size:12px;outline:none;cursor:pointer;}
+.modal-note{font-size:10px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:8px 12px;margin:12px 0;line-height:1.6;}
+.modal-note span{color:var(--yellow);}
+.modal-actions{display:flex;gap:10px;margin-top:20px;}
+.modal-btn-primary{flex:1;padding:11px;background:var(--green);color:#000;border:none;border-radius:6px;font-weight:700;font-size:13px;cursor:pointer;font-family:'JetBrains Mono',monospace;}
+.modal-btn-secondary{padding:11px 16px;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;font-family:'JetBrains Mono',monospace;}
+.modal-btn-secondary:hover{border-color:var(--text);color:var(--text);}
+.manual-tag{display:inline-block;font-size:9px;color:var(--yellow);border:1px solid rgba(255,215,64,.4);border-radius:3px;padding:1px 6px;margin-left:6px;vertical-align:middle;}
+
+/* ── PRINT / PDF ─────────────────────────────────────── */
+@media print{
+  @page{margin:15mm 12mm;size:A4;}
+  body{background:#fff!important;color:#111!important;}
+  :root{
+    --bg:#fff;--surface:#f5f5f5;--card:#f8f8f8;--border:#ddd;
+    --text:#222;--muted:#666;--faint:#eee;--white:#111;
+    --green:#1a7f3c;--yellow:#9a7000;--red:#b91c1c;--blue:#1d4ed8;--purple:#6d28d9;
+  }
+  .nav,.settings-panel,.history-bar,.chips,.chips-label,.feature-pills,
+  .analyze-btn,.nav-btn,.save-pdf-btn,.modal-overlay,.landing,
+  .action-today,.slider-card,.tabs-wrap,.back-btn{display:none!important;}
+  .app{max-width:100%;padding:0;}
+  .tab-content{display:block!important;}
+  .tab-content+.tab-content{page-break-before:always;}
+  .report-header{background:#f5f5f5!important;border:1px solid #ddd!important;break-inside:avoid;}
+  .risk-card,.verdict-card,.bb-card,.segment,.when-hero,.price-target-card,
+  .kpi,.multiple-card,.platform-card{break-inside:avoid;}
+  .bull-bear,.triggers-grid,.platform-grid{grid-template-columns:1fr 1fr!important;}
+  .ta-grid{grid-template-columns:1fr 1fr!important;}
+  .price-pos-fill{print-color-adjust:exact;-webkit-print-color-adjust:exact;}
+  .signal-bar-item{print-color-adjust:exact;-webkit-print-color-adjust:exact;}
+  .disclaimer{border-top:1px solid #ddd!important;color:#999!important;font-size:9px!important;}
+  .live-badge{display:none!important;}
+}
 </style>
 </head>
 <body>
@@ -293,7 +345,10 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
       <div class="nav-dot"></div>
       <span class="nav-label">BASTIÁN · EQUITY RESEARCH</span>
     </div>
-    <button class="nav-btn" id="navBack" style="display:none" onclick="showLanding()">← Nueva búsqueda</button>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="save-pdf-btn" id="savePdfBtn" onclick="savePDF()">💾 Guardar PDF</button>
+      <button class="nav-btn" id="navBack" style="display:none" onclick="showLanding()">← Nueva búsqueda</button>
+    </div>
   </div>
 
   <div class="settings-panel" id="settingsPanel" style="display:none">
@@ -314,6 +369,142 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
   <div id="screenLoading" style="display:none"></div>
   <div id="screenReport" style="display:none"></div>
   <div id="screenError" style="display:none"></div>
+</div>
+
+<!-- MANUAL DATA MODAL -->
+<div class="modal-overlay" id="manualModal" style="display:none" onclick="if(event.target===this)closeManualModal()">
+  <div class="modal-box">
+    <div class="modal-title">
+      <span>📊 Ingresar datos manualmente</span>
+      <span style="cursor:pointer;color:var(--muted);font-size:18px" onclick="closeManualModal()">×</span>
+    </div>
+    <div class="modal-sub">Ingresa el ticker y los datos que tengas. Solo el precio es obligatorio — el resto mejora el análisis. Puedes sacarlos de Yahoo Finance, TradingView o cualquier app financiera.</div>
+
+    <div class="modal-section">📌 Identificación</div>
+    <div class="field-grid">
+      <div>
+        <div class="field-label">TICKER *</div>
+        <input class="field-input" id="m_ticker" placeholder="AAPL" maxlength="6" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z]/,'')">
+      </div>
+      <div>
+        <div class="field-label">NOMBRE (opcional)</div>
+        <input class="field-input" id="m_name" placeholder="Apple Inc.">
+      </div>
+    </div>
+
+    <div class="modal-section">💰 Valuación fundamental</div>
+    <div class="field-grid">
+      <div>
+        <div class="field-label">PRECIO ACTUAL * (USD)</div>
+        <input class="field-input" id="m_price" type="number" placeholder="185.50" step="0.01">
+      </div>
+      <div>
+        <div class="field-label">MARKET CAP</div>
+        <input class="field-input" id="m_mktcap" placeholder="$2.8T o $180B">
+      </div>
+    </div>
+    <div class="field-grid-3">
+      <div>
+        <div class="field-label">P/E TTM</div>
+        <input class="field-input" id="m_pe_ttm" type="number" placeholder="28.5" step="0.1">
+      </div>
+      <div>
+        <div class="field-label">P/E FORWARD</div>
+        <input class="field-input" id="m_pe_fwd" type="number" placeholder="24.0" step="0.1">
+      </div>
+      <div>
+        <div class="field-label">P/S RATIO</div>
+        <input class="field-input" id="m_ps" type="number" placeholder="7.2" step="0.1">
+      </div>
+    </div>
+    <div class="field-grid">
+      <div>
+        <div class="field-label">EV/EBITDA</div>
+        <input class="field-input" id="m_ev" type="number" placeholder="18.5" step="0.1">
+      </div>
+      <div>
+        <div class="field-label">TARGET ANALISTAS (USD)</div>
+        <input class="field-input" id="m_target" type="number" placeholder="210.00" step="0.01">
+      </div>
+    </div>
+
+    <div class="modal-section">📈 Métricas operacionales</div>
+    <div class="field-grid">
+      <div>
+        <div class="field-label">REVENUE TTM</div>
+        <input class="field-input" id="m_rev" placeholder="$395B o $12.5B">
+      </div>
+      <div>
+        <div class="field-label">FREE CASH FLOW</div>
+        <input class="field-input" id="m_fcf" placeholder="$95B o $3.2B">
+      </div>
+    </div>
+    <div class="field-grid-3">
+      <div>
+        <div class="field-label">NET MARGIN %</div>
+        <input class="field-input" id="m_margin" type="number" placeholder="25.3" step="0.1">
+      </div>
+      <div>
+        <div class="field-label">REVENUE GROWTH YoY %</div>
+        <input class="field-input" id="m_growth" type="number" placeholder="12.5" step="0.1">
+      </div>
+      <div>
+        <div class="field-label">CAMBIO 1 AÑO %</div>
+        <input class="field-input" id="m_change1y" type="number" placeholder="18.3" step="0.1">
+      </div>
+    </div>
+    <div class="field-grid">
+      <div>
+        <div class="field-label">MÁXIMO 52 SEMANAS</div>
+        <input class="field-input" id="m_high52" type="number" placeholder="220.20" step="0.01">
+      </div>
+      <div>
+        <div class="field-label">MÍNIMO 52 SEMANAS</div>
+        <input class="field-input" id="m_low52" type="number" placeholder="142.70" step="0.01">
+      </div>
+    </div>
+
+    <div class="modal-section">📊 Indicadores técnicos básicos</div>
+    <div class="modal-note"><span>💡 Cómo obtenerlos:</span> Abre TradingView o Yahoo Finance → busca el ticker → los indicadores RSI y medias móviles aparecen en el panel inferior o en "Estadísticas".</div>
+    <div class="field-grid">
+      <div>
+        <div class="field-label">RSI (14)</div>
+        <input class="field-input" id="m_rsi" type="number" placeholder="52.3" min="0" max="100" step="0.1">
+      </div>
+      <div>
+        <div class="field-label">TENDENCIA GENERAL</div>
+        <select class="field-select field-input" id="m_trend">
+          <option value="">Seleccionar...</option>
+          <option value="ALCISTA">📈 Alcista (precio subiendo)</option>
+          <option value="NEUTRAL">➡ Neutral (precio lateral)</option>
+          <option value="BAJISTA">📉 Bajista (precio bajando)</option>
+        </select>
+      </div>
+    </div>
+    <div class="field-grid">
+      <div>
+        <div class="field-label">PRECIO vs SMA50</div>
+        <select class="field-select field-input" id="m_sma50">
+          <option value="">No sé</option>
+          <option value="above">✅ Por encima</option>
+          <option value="below">❌ Por debajo</option>
+        </select>
+      </div>
+      <div>
+        <div class="field-label">PRECIO vs SMA200</div>
+        <select class="field-select field-input" id="m_sma200">
+          <option value="">No sé</option>
+          <option value="above">✅ Por encima</option>
+          <option value="below">❌ Por debajo</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="modal-btn-secondary" onclick="closeManualModal()">Cancelar</button>
+      <button class="modal-btn-primary" onclick="submitManualData()">ANALIZAR →</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -348,6 +539,7 @@ function saveApiKey() {
 function showLanding() {
   document.getElementById('navBack').style.display='none';
   document.getElementById('historyBar').style.display='none';
+  document.getElementById('savePdfBtn').style.display='none';
   ['screenLoading','screenReport','screenError'].forEach(id=>document.getElementById(id).style.display='none');
   document.getElementById('screenLanding').style.display='block';
   renderLanding();
@@ -365,6 +557,10 @@ function renderLanding() {
           oninput="this.value=this.value.toUpperCase().replace(/[^A-Z]/g,'')"
           onkeydown="if(event.key==='Enter') startAnalysis(this.value)">
         <button class="analyze-btn" onclick="startAnalysis(document.getElementById('tickerInput').value)">ANALIZAR →</button>
+      </div>
+      <div style="text-align:right;margin-top:-8px;margin-bottom:20px;">
+        <span style="font-size:11px;color:var(--muted);">Yahoo Finance bloqueado? →</span>
+        <button onclick="openManualModal()" style="background:transparent;border:none;color:var(--blue);font-size:11px;cursor:pointer;text-decoration:underline;font-family:'JetBrains Mono',monospace;padding:0 4px;">Ingresar datos manualmente</button>
       </div>
       <div class="chips-label">Acceso rápido</div>
       <div class="chips">${WATCHLIST.map(w=>`<div class="chip" onclick="startAnalysis('${w.ticker}')">${w.ticker}<span class="chip-label">${w.label}</span></div>`).join('')}</div>
@@ -602,8 +798,9 @@ async function fetchTechnicalData(ticker) {
 const PROFILE=`Eres el analista financiero personal de Bastián. QF chileno, inversor nivel 0-1, largo plazo 3-5+ años. Plataformas: Fintual + Interactive Brokers. Portafolio: Risky Norris 60% + planea GOOG, MA, GLD. Watchlist: NOW, AVGO, MSFT. Evitando: APO, ARKK, DUOL.`;
 
 function buildPrompt(ticker,mkt,ta) {
-  const rd=mkt?.ok?`DATOS REALES YAHOO FINANCE: Empresa:${mkt.longName} Precio:$${mkt.currentPrice} MktCap:${mkt.marketCap} P/E TTM:${mkt.peTTM||'N/D'} P/E Fwd:${mkt.peForward||'N/D'} P/S:${mkt.priceToSales||'N/D'} EV/EBITDA:${mkt.evEbitda||'N/D'} Cambio1A:${mkt.change1y!=null?mkt.change1y+'%':'N/D'} 52w:$${mkt.low52w}-$${mkt.high52w} Rev:${mkt.totalRevenue||'N/D'} CrecYoY:${mkt.revenueGrowth||'N/D'} MargenNeto:${mkt.profitMargins||'N/D'} FCF:${mkt.freeCashflow||'N/D'} TargetAnalistas:$${mkt.targetMeanPrice||'N/D'}`:'Sin datos en tiempo real.';
-  const taCtx=ta?.ok?`INDICADORES TÉCNICOS CALCULADOS: Tendencia:${ta.trend} Señales:${ta.signals.bullish}/10 RSI14:${ta.rsi} MACD:${ta.macdLine} SMA50:${ta.sma50} SMA200:${ta.sma200} EMA9:${ta.ema9} EMA21:${ta.ema21} Señal:${ta.goldCross||'N/D'} Stoch%K:${ta.stochK||'N/D'} Stoch%D:${ta.stochD||'N/D'} StochZona:${ta.stochZone} OBV:${ta.obvTrend} BB:${ta.bbLower}-${ta.bbUpper} Fibonacci_más_cercano:${ta.fibClosest?.level}($${ta.fibClosest?.price}) Soportes:${ta.supports?.join('/')||'N/D'} Resistencias:${ta.resistances?.join('/')||'N/D'}`:'Sin datos técnicos.';
+  const isManualMkt = mkt?.manual;
+  const rd=mkt?.ok?`${isManualMkt?'DATOS MANUALES (ingresados por el usuario)':'DATOS REALES YAHOO FINANCE'}: Empresa:${mkt.longName} Precio:$${mkt.currentPrice} MktCap:${mkt.marketCap||'N/D'} P/E TTM:${mkt.peTTM||'N/D'} P/E Fwd:${mkt.peForward||'N/D'} P/S:${mkt.priceToSales||'N/D'} EV/EBITDA:${mkt.evEbitda||'N/D'} Cambio1A:${mkt.change1y!=null?mkt.change1y+'%':'N/D'} 52w:$${mkt.low52w||'N/D'}-$${mkt.high52w||'N/D'} Rev:${mkt.totalRevenue||'N/D'} CrecYoY:${mkt.revenueGrowth||'N/D'} MargenNeto:${mkt.profitMargins||'N/D'} FCF:${mkt.freeCashflow||'N/D'} TargetAnalistas:$${mkt.targetMeanPrice||'N/D'}`:'Sin datos en tiempo real.';
+  const taCtx=ta?.ok?(ta.manual?`DATOS TÉCNICOS BÁSICOS (manuales): Tendencia:${ta.trend} RSI14:${ta.rsi||'N/D'} PrecioSobreSMA50:${ta.aboveSMA50===true?'SÍ':ta.aboveSMA50===false?'NO':'N/D'} PrecioSobreSMA200:${ta.aboveSMA200===true?'SÍ':ta.aboveSMA200===false?'NO':'N/D'}. NOTA: Solo hay datos técnicos básicos; usa tu conocimiento del mercado para completar el análisis técnico detallado.`:`INDICADORES TÉCNICOS CALCULADOS: Tendencia:${ta.trend} Señales:${ta.signals.bullish}/10 RSI14:${ta.rsi} MACD:${ta.macdLine} SMA50:${ta.sma50} SMA200:${ta.sma200} EMA9:${ta.ema9} EMA21:${ta.ema21} Señal:${ta.goldCross||'N/D'} Stoch%K:${ta.stochK||'N/D'} Stoch%D:${ta.stochD||'N/D'} StochZona:${ta.stochZone} OBV:${ta.obvTrend} BB:${ta.bbLower}-${ta.bbUpper} Fibonacci_más_cercano:${ta.fibClosest?.level}($${ta.fibClosest?.price}) Soportes:${ta.supports?.join('/')||'N/D'} Resistencias:${ta.resistances?.join('/')||'N/D'}`):'Sin datos técnicos.';
   const dateStr=new Date().toLocaleDateString('es-CL');
   return `${PROFILE}\n${rd}\n${taCtx}\n
 Analiza "${ticker}". DEVUELVE SOLO JSON sin markdown ni backticks:
@@ -666,12 +863,15 @@ function renderReport(data,mkt,ta) {
   const chg=parseFloat(data.price_change_1y);
 
   document.getElementById('navBack').style.display='block';
+  document.getElementById('savePdfBtn').style.display='block';
   document.getElementById('screenLoading').style.display='none';
   document.getElementById('screenLanding').style.display='none';
   if(history.length>1){document.getElementById('historyBar').style.display='flex';document.getElementById('historyBtns').innerHTML=history.map(t=>`<button class="history-btn${t===currentTicker?' active':''}" onclick="startAnalysis('${t}')">${t}</button>`).join('');}
 
   const liveBadge=mkt?.ok
-    ?`<div class="live-badge ok">🟢 Tiempo real <span class="price">$${mkt.currentPrice}</span> · ${mkt.marketCap} · P/E: ${mkt.peTTM||'N/D'} · Yahoo Finance vía Vercel ${mkt.fetchedAt}</div>`
+    ?(mkt.manual
+      ?`<div class="live-badge warn">📋 Datos ingresados manualmente · Precio: <span class="price">$${mkt.currentPrice}</span> · Análisis basado en datos que tú proporcionaste</div>`
+      :`<div class="live-badge ok">🟢 Tiempo real <span class="price">$${mkt.currentPrice}</span> · ${mkt.marketCap} · P/E: ${mkt.peTTM||'N/D'} · Yahoo Finance vía Vercel ${mkt.fetchedAt}</div>`)
     :`<div class="live-badge warn">⚠ Sin datos en tiempo real — usando estimaciones</div>`;
 
   // ── FUNDAMENTAL TAB ──
@@ -973,6 +1173,122 @@ function renderReport(data,mkt,ta) {
   // restore active tab
   if(activeTab!=='fund') setTimeout(()=>switchTab(activeTab),50);
 }
+/* ─── MANUAL MODE ─── */
+function openManualModal() {
+  document.getElementById('manualModal').style.display='flex';
+}
+function closeManualModal() {
+  document.getElementById('manualModal').style.display='none';
+}
+function submitManualData() {
+  const ticker = document.getElementById('m_ticker').value.trim().toUpperCase();
+  const price = parseFloat(document.getElementById('m_price').value);
+  if(!ticker){alert('⚠ Ingresa el ticker (ej: AAPL, MSFT)'); return;}
+  if(!price || isNaN(price)){alert('⚠ El precio actual es obligatorio'); return;}
+  if(!apiKey){closeManualModal();document.getElementById('settingsPanel').style.display='block';alert('⚠ Ingresa tu API Key de Anthropic primero');return;}
+
+  const val = id => document.getElementById(id).value;
+  const num = id => { const v=parseFloat(val(id)); return isNaN(v)?null:v; };
+
+  const mkt = {
+    ok: true,
+    manual: true,
+    ticker,
+    longName: val('m_name').trim() || ticker,
+    currency: 'USD',
+    sector: null,
+    currentPrice: price,
+    marketCap: val('m_mktcap').trim() || null,
+    peTTM: num('m_pe_ttm'),
+    peForward: num('m_pe_fwd'),
+    priceToSales: num('m_ps'),
+    priceToBook: null,
+    evEbitda: num('m_ev'),
+    change1y: num('m_change1y'),
+    high52w: num('m_high52'),
+    low52w: num('m_low52'),
+    revenueGrowth: num('m_growth') ? num('m_growth')+'%' : null,
+    grossMargins: null,
+    profitMargins: num('m_margin') ? num('m_margin')+'%' : null,
+    freeCashflow: val('m_fcf').trim() || null,
+    totalRevenue: val('m_rev').trim() || null,
+    targetMeanPrice: num('m_target'),
+    fetchedAt: new Date().toLocaleTimeString('es-CL'),
+  };
+
+  const trend = val('m_trend') || 'NEUTRAL';
+  const rsiVal = num('m_rsi');
+  const aboveSMA50 = val('m_sma50') === 'above' ? true : val('m_sma50') === 'below' ? false : null;
+  const aboveSMA200 = val('m_sma200') === 'above' ? true : val('m_sma200') === 'below' ? false : null;
+  const bullSigs = (trend==='ALCISTA'?2:0) + (rsiVal&&rsiVal>50&&rsiVal<70?1:0) + (aboveSMA50===true?1:0) + (aboveSMA200===true?1:0);
+  const bearSigs = (trend==='BAJISTA'?2:0) + (rsiVal&&rsiVal<30?2:rsiVal&&rsiVal>70?1:0) + (aboveSMA50===false?1:0) + (aboveSMA200===false?1:0);
+
+  const ta = {
+    ok: true,
+    manual: true,
+    price,
+    trend, trendColor: trend==='ALCISTA'?'var(--green)':trend==='BAJISTA'?'var(--red)':'var(--yellow)',
+    signals: { bullish: bullSigs, bearish: bearSigs, neutral: 10-bullSigs-bearSigs },
+    rsi: rsiVal ? rsiVal.toFixed(1) : null,
+    sma50: null, sma200: null, sma20: null,
+    ema9: null, ema21: null, ema9Cross: null,
+    macdLine: null, macdHist: null,
+    bbUpper: null, bbMiddle: null, bbLower: null,
+    stochK: null, stochD: null, stochZone: 'NEUTRAL',
+    obvTrend: 'N/D', obvChange: null,
+    fib: null, fibClosest: null,
+    supports: [], resistances: [],
+    volRatio: null, atrPct: null, goldCross: null,
+    aboveSMA50, aboveSMA200,
+  };
+
+  closeManualModal();
+  currentTicker = ticker;
+  currentMkt = mkt;
+
+  if(cache[ticker+'_manual']){
+    renderReport(cache[ticker+'_manual'].data, mkt, ta);
+    return;
+  }
+
+  showLoading(ticker);
+  // Llama directamente a Claude sin Yahoo Finance
+  const prompt = buildPrompt(ticker, mkt, ta);
+  setLoadStep(3);
+  fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,messages:[{role:'user',content:prompt}]})
+  }).then(r=>{
+    if(!r.ok) return r.json().then(e=>{throw new Error(e.error?.message||`Error ${r.status}`);});
+    return r.json();
+  }).then(raw=>{
+    let text=raw.content?.find(b=>b.type==='text')?.text||'';
+    text=text.replace(/```json\n?/gi,'').replace(/```\n?/gi,'').trim();
+    const data=JSON.parse(text);
+    cache[ticker+'_manual']={data,mkt,ta};
+    history=[ticker,...history.filter(h=>h!==ticker)].slice(0,8);
+    clearInterval(loadStepInterval);
+    renderReport(data,mkt,ta);
+  }).catch(e=>showError(e.message||'Error desconocido'));
+}
+
+/* ─── SAVE PDF ─── */
+function savePDF() {
+  // Make all tabs visible before printing
+  document.querySelectorAll('.tab-content').forEach(el=>el.setAttribute('data-print-visible', el.classList.contains('active')?'active':''));
+  document.querySelectorAll('.tab-content').forEach(el=>el.style.display='block');
+  const title = currentTicker ? `Análisis ${currentTicker} · Bastián Equity Research` : 'Bastián · Equity Research';
+  const prevTitle = document.title;
+  document.title = title;
+  window.print();
+  document.title = prevTitle;
+  // Restore tabs
+  setTimeout(()=>{
+    document.querySelectorAll('.tab-content').forEach(el=>{
+      el.style.display = el.dataset.printVisible==='active' ? 'block' : 'none';
+    });
+  }, 500);
+}
 </script>
-</body>
 </html>

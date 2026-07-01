@@ -358,6 +358,12 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
       <input type="password" class="api-key-input" id="apiKeyInput" placeholder="sk-ant-api03-...">
       <button class="save-btn" onclick="saveApiKey()">GUARDAR</button>
     </div>
+    <h3 style="margin-top:18px">📈 API Key de datos · Financial Modeling Prep</h3>
+    <p>Datos de mercado en vivo sin servidor (funciona en GitHub Pages). Gratis en <a href="https://site.financialmodelingprep.com/developer/docs" target="_blank">financialmodelingprep.com</a> · 250 consultas/día. Opcional: sin ella, usa modo manual. Se comparte con el panel.</p>
+    <div class="api-key-row">
+      <input type="password" class="api-key-input" id="fmpKeyInput" placeholder="tu API key de FMP">
+      <button class="save-btn" onclick="saveFmpKey()">GUARDAR</button>
+    </div>
   </div>
 
   <div class="history-bar" id="historyBar" style="display:none">
@@ -509,9 +515,17 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
 
 <script>
 /* ─── STATE ─── */
-let apiKey = localStorage.getItem('bastian_api_key') || '';
-let fmpKey = localStorage.getItem('bastian_fmp_key') || '';
+let apiKey = localStorage.getItem('panel.v5.api_key') || localStorage.getItem('bastian_api_key') || '';
+let fmpKey = localStorage.getItem('panel.v5.fmp_key') || localStorage.getItem('bastian_fmp_key') || '';
 let history = [], cache = {}, currentTicker = '', currentMkt = null;
+/* Datos en vivo (Yahoo) vía backend serverless. En GitHub Pages (sitio estático) las rutas /api/*
+   no existen, así que el Analizador cae a modo manual + estimaciones (sigue funcionando).
+   Para tener datos en vivo TAMBIÉN desde GitHub Pages, pega aquí la URL base de tu backend en
+   Vercel, ej: const API_BASE = 'https://tu-analizador.vercel.app';  (requiere CORS habilitado). */
+/* Servido DESDE Vercel: el backend (api/quote.js, api/history.js) vive en el mismo dominio,
+   así que las llamadas son mismo-origen (API_BASE vacío = ruta relativa /api/...).
+   Orden de fuentes: 1º FMP si hay API key (⚙), 2º proxy Yahoo mismo-origen, 3º modo manual. */
+const API_BASE = '';
 let loadStepInterval = null, activeTab = 'fund';
 
 const WATCHLIST = [
@@ -526,13 +540,23 @@ const LOAD_STEPS = [
 ];
 
 window.onload = () => {
-  if(!apiKey) document.getElementById('settingsPanel').style.display='block';
+  const ak=document.getElementById('apiKeyInput'); if(ak&&apiKey) ak.value=apiKey;
+  const fk=document.getElementById('fmpKeyInput'); if(fk&&fmpKey) fk.value=fmpKey;
+  // Abre Ajustes si falta la key de Claude (obligatoria) o la de FMP (datos en vivo)
+  if(!apiKey || !fmpKey) document.getElementById('settingsPanel').style.display='block';
   showLanding();
 };
 
 function saveApiKey() {
   const v = document.getElementById('apiKeyInput').value.trim();
-  if(v){ apiKey=v; localStorage.setItem('bastian_api_key',v); document.getElementById('settingsPanel').style.display='none'; alert('✅ API Key guardada'); }
+  if(v){ apiKey=v; localStorage.setItem('panel.v5.api_key',v); localStorage.setItem('bastian_api_key',v); document.getElementById('settingsPanel').style.display='none'; alert('✅ API Key guardada'); }
+}
+
+function saveFmpKey() {
+  const v = document.getElementById('fmpKeyInput').value.trim();
+  fmpKey = v;
+  if(v){ localStorage.setItem('panel.v5.fmp_key',v); localStorage.setItem('bastian_fmp_key',v); alert('✅ API Key de datos guardada · datos en vivo activos'); }
+  else { localStorage.removeItem('panel.v5.fmp_key'); localStorage.removeItem('bastian_fmp_key'); alert('API Key de datos borrada · modo manual'); }
 }
 
 /* ─── SCREENS ─── */
@@ -559,7 +583,7 @@ function renderLanding() {
         <button class="analyze-btn" onclick="startAnalysis(document.getElementById('tickerInput').value)">ANALIZAR →</button>
       </div>
       <div style="text-align:right;margin-top:-8px;margin-bottom:20px;">
-        <span style="font-size:11px;color:var(--muted);">Yahoo Finance bloqueado? →</span>
+        <span style="font-size:11px;color:var(--muted);">¿Sin datos en vivo? →</span>
         <button onclick="openManualModal()" style="background:transparent;border:none;color:var(--blue);font-size:11px;cursor:pointer;text-decoration:underline;font-family:'JetBrains Mono',monospace;padding:0 4px;">Ingresar datos manualmente</button>
       </div>
       <div class="chips-label">Acceso rápido</div>
@@ -607,10 +631,91 @@ function showError(msg) {
   document.getElementById('screenError').innerHTML = `<div class="error-screen"><div class="error-icon">⚠️</div><div class="error-title">Error al analizar</div><p class="error-msg">${msg}</p><button class="back-btn" onclick="showLanding()">← Volver</button></div>`;
 }
 
-/* ─── DATOS DE MERCADO — vía Vercel proxy → Yahoo Finance ─── */
+/* ─── FUENTE DE DATOS · Financial Modeling Prep (llamada directa desde el navegador) ─── */
+/* Funciona en GitHub Pages sin backend. Prueba stable (?symbol=) y cae a v3 (/TICKER). */
+async function fmpFetch(stableUrl, v3Url) {
+  for (const u of [stableUrl, v3Url]) {
+    if (!u) continue;
+    try {
+      const r = await fetch(u, { signal: AbortSignal.timeout(11000) });
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (j && (Array.isArray(j) ? j.length : Object.keys(j).length)) return j;
+    } catch(e) {}
+  }
+  return null;
+}
+const _row = j => j ? (Array.isArray(j) ? j[0] : j) : null;
+async function fetchMarketDataFMP(ticker) {
+  const k = fmpKey;
+  const q = _row(await fmpFetch(
+    `https://financialmodelingprep.com/stable/quote?symbol=${ticker}&apikey=${k}`,
+    `https://financialmodelingprep.com/api/v3/quote/${ticker}?apikey=${k}`));
+  if (!q || q.price == null) return null;
+  const prof = _row(await fmpFetch(
+    `https://financialmodelingprep.com/stable/profile?symbol=${ticker}&apikey=${k}`,
+    `https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${k}`)) || {};
+  const rt = _row(await fmpFetch(
+    `https://financialmodelingprep.com/stable/ratios-ttm?symbol=${ticker}&apikey=${k}`,
+    `https://financialmodelingprep.com/api/v3/ratios-ttm/${ticker}?apikey=${k}`)) || {};
+  const inc = _row(await fmpFetch(
+    `https://financialmodelingprep.com/stable/income-statement?symbol=${ticker}&limit=1&apikey=${k}`,
+    `https://financialmodelingprep.com/api/v3/income-statement/${ticker}?limit=1&apikey=${k}`)) || {};
+  const num = (...v) => { for (const x of v) { if (x != null && x !== '' && !isNaN(x)) return Number(x); } return null; };
+  const fmt = (n,d=2) => n!=null && !isNaN(n) ? parseFloat(Number(n).toFixed(d)) : null;
+  const fmtPct = n => n!=null && !isNaN(n) ? (Number(n)*100).toFixed(1)+'%' : null;
+  const fmtBig = n => { if (n==null||isNaN(n)) return null; n=Number(n); const s=n<0?'-':''; n=Math.abs(n);
+    if (n>=1e12) return s+'$'+(n/1e12).toFixed(2)+'T'; if (n>=1e9) return s+'$'+(n/1e9).toFixed(1)+'B';
+    if (n>=1e6) return s+'$'+(n/1e6).toFixed(1)+'M'; return s+'$'+n.toFixed(0); };
+  let hi=fmt(num(q.yearHigh)), lo=fmt(num(q.yearLow));
+  if ((hi==null||lo==null) && typeof prof.range==='string' && prof.range.includes('-')) {
+    const p = prof.range.split('-').map(s=>parseFloat(s.trim())); lo = lo ?? fmt(p[0]); hi = hi ?? fmt(p[1]);
+  }
+  return {
+    ok:true, source:'fmp', ticker:(q.symbol||ticker).toUpperCase(),
+    longName: q.name || prof.companyName || ticker,
+    currency: prof.currency || 'USD',
+    sector: prof.sector || null,
+    currentPrice: fmt(num(q.price)),
+    marketCap: fmtBig(num(q.marketCap, prof.mktCap)),
+    peTTM: fmt(num(q.pe, rt.priceEarningsRatioTTM, rt.peRatioTTM), 1),
+    peForward: null,
+    priceToSales: fmt(num(rt.priceToSalesRatioTTM), 1),
+    priceToBook: fmt(num(rt.priceToBookRatioTTM, rt.priceBookValueRatioTTM), 1),
+    evEbitda: fmt(num(rt.enterpriseValueMultipleTTM), 1),
+    change1y: null,
+    high52w: hi, low52w: lo,
+    revenueGrowth: null,
+    grossMargins: fmtPct(num(rt.grossProfitMarginTTM)),
+    profitMargins: fmtPct(num(rt.netProfitMarginTTM)),
+    freeCashflow: null,
+    totalRevenue: fmtBig(num(inc.revenue)),
+    targetMeanPrice: null,
+    fetchedAt: new Date().toLocaleTimeString('es-CL'),
+  };
+}
+async function fmpSeries(ticker) {
+  const k = fmpKey;
+  const j = await fmpFetch(
+    `https://financialmodelingprep.com/stable/historical-price-eod/full?symbol=${ticker}&apikey=${k}`,
+    `https://financialmodelingprep.com/api/v3/historical-price-full/${ticker}?timeseries=320&apikey=${k}`);
+  let rows = Array.isArray(j) ? j : (j && j.historical ? j.historical : null);
+  if (!rows || !rows.length) throw new Error('Sin histórico FMP');
+  rows = rows.slice().sort((a,b)=> new Date(a.date) - new Date(b.date));
+  if (rows.length > 320) rows = rows.slice(-320);
+  return {
+    closes:  rows.map(d=>d.close).filter(v=>v!=null),
+    volumes: rows.map(d=>d.volume).filter(v=>v!=null),
+    highs:   rows.map(d=>d.high).filter(v=>v!=null),
+    lows:    rows.map(d=>d.low).filter(v=>v!=null),
+  };
+}
+
+/* ─── DATOS DE MERCADO — FMP directo, con fallback a proxy Vercel→Yahoo ─── */
 async function fetchMarketData(ticker) {
+  if (fmpKey) { const fmp = await fetchMarketDataFMP(ticker); if (fmp && fmp.ok) return fmp; }
   try {
-    const res = await fetch(`/api/quote?ticker=${ticker}`, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(`${API_BASE}/api/quote?ticker=${ticker}`, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(`Error ${res.status}`);
     const json = await res.json();
     const r = json?.quoteSummary?.result?.[0];
@@ -649,15 +754,20 @@ async function fetchMarketData(ticker) {
 async function fetchTechnicalData(ticker) {
   let closes=[], volumes=[], highs=[], lows=[];
   try {
-    const res = await fetch(`/api/history?ticker=${ticker}`, { signal: AbortSignal.timeout(12000) });
-    if (!res.ok) throw new Error(`Error ${res.status}`);
-    const json = await res.json();
-    const r = json?.chart?.result?.[0];
-    if (!r) throw new Error('Sin datos históricos');
-    closes  = r.indicators.quote[0].close.filter(v=>v!=null);
-    volumes = r.indicators.quote[0].volume.filter(v=>v!=null);
-    highs   = r.indicators.quote[0].high.filter(v=>v!=null);
-    lows    = r.indicators.quote[0].low.filter(v=>v!=null);
+    if (fmpKey) {
+      const s = await fmpSeries(ticker);
+      closes = s.closes; volumes = s.volumes; highs = s.highs; lows = s.lows;
+    } else {
+      const res = await fetch(`${API_BASE}/api/history?ticker=${ticker}`, { signal: AbortSignal.timeout(12000) });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const json = await res.json();
+      const r = json?.chart?.result?.[0];
+      if (!r) throw new Error('Sin datos históricos');
+      closes  = r.indicators.quote[0].close.filter(v=>v!=null);
+      volumes = r.indicators.quote[0].volume.filter(v=>v!=null);
+      highs   = r.indicators.quote[0].high.filter(v=>v!=null);
+      lows    = r.indicators.quote[0].low.filter(v=>v!=null);
+    }
     if (closes.length < 20) throw new Error('Datos insuficientes');
   } catch(e) { return {ok:false}; }
   try{
@@ -779,7 +889,7 @@ async function fetchTechnicalData(ticker) {
     const trend=sigs.bullish>=6?'ALCISTA':sigs.bearish>=6?'BAJISTA':'NEUTRAL';
     const trendColor=trend==='ALCISTA'?'var(--green)':trend==='BAJISTA'?'var(--red)':'var(--yellow)';
 
-    return{ok:true,price,sma20:sma20?.toFixed(2),sma50:sma50?.toFixed(2),sma200:sma200?.toFixed(2),
+    return{ok:true,price,change1y:closes.length>1?parseFloat((((price-closes[0])/closes[0])*100).toFixed(1)):null,sma20:sma20?.toFixed(2),sma50:sma50?.toFixed(2),sma200:sma200?.toFixed(2),
       ema9:ema9?.toFixed(2),ema21:ema21?.toFixed(2),ema9Cross,
       rsi:rsiVal?.toFixed(1),macdLine:macdLine?.toFixed(3),macdHist:macdHist?.toFixed(3),
       bbUpper:bbUpper?.toFixed(2),bbMiddle:bbMiddle?.toFixed(2),bbLower:bbLower?.toFixed(2),
@@ -799,7 +909,7 @@ const PROFILE=`Eres el analista financiero personal de Bastián. QF chileno, inv
 
 function buildPrompt(ticker,mkt,ta) {
   const isManualMkt = mkt?.manual;
-  const rd=mkt?.ok?`${isManualMkt?'DATOS MANUALES (ingresados por el usuario)':'DATOS REALES YAHOO FINANCE'}: Empresa:${mkt.longName} Precio:$${mkt.currentPrice} MktCap:${mkt.marketCap||'N/D'} P/E TTM:${mkt.peTTM||'N/D'} P/E Fwd:${mkt.peForward||'N/D'} P/S:${mkt.priceToSales||'N/D'} EV/EBITDA:${mkt.evEbitda||'N/D'} Cambio1A:${mkt.change1y!=null?mkt.change1y+'%':'N/D'} 52w:$${mkt.low52w||'N/D'}-$${mkt.high52w||'N/D'} Rev:${mkt.totalRevenue||'N/D'} CrecYoY:${mkt.revenueGrowth||'N/D'} MargenNeto:${mkt.profitMargins||'N/D'} FCF:${mkt.freeCashflow||'N/D'} TargetAnalistas:$${mkt.targetMeanPrice||'N/D'}`:'Sin datos en tiempo real.';
+  const rd=mkt?.ok?`${isManualMkt?'DATOS MANUALES (ingresados por el usuario)':(mkt.source==='fmp'?'DATOS REALES (Financial Modeling Prep)':'DATOS REALES YAHOO FINANCE')}: Empresa:${mkt.longName} Precio:$${mkt.currentPrice} MktCap:${mkt.marketCap||'N/D'} P/E TTM:${mkt.peTTM||'N/D'} P/E Fwd:${mkt.peForward||'N/D'} P/S:${mkt.priceToSales||'N/D'} EV/EBITDA:${mkt.evEbitda||'N/D'} Cambio1A:${mkt.change1y!=null?mkt.change1y+'%':'N/D'} 52w:$${mkt.low52w||'N/D'}-$${mkt.high52w||'N/D'} Rev:${mkt.totalRevenue||'N/D'} CrecYoY:${mkt.revenueGrowth||'N/D'} MargenNeto:${mkt.profitMargins||'N/D'} FCF:${mkt.freeCashflow||'N/D'} TargetAnalistas:$${mkt.targetMeanPrice||'N/D'}`:'Sin datos en tiempo real.';
   const taCtx=ta?.ok?(ta.manual?`DATOS TÉCNICOS BÁSICOS (manuales): Tendencia:${ta.trend} RSI14:${ta.rsi||'N/D'} PrecioSobreSMA50:${ta.aboveSMA50===true?'SÍ':ta.aboveSMA50===false?'NO':'N/D'} PrecioSobreSMA200:${ta.aboveSMA200===true?'SÍ':ta.aboveSMA200===false?'NO':'N/D'}. NOTA: Solo hay datos técnicos básicos; usa tu conocimiento del mercado para completar el análisis técnico detallado.`:`INDICADORES TÉCNICOS CALCULADOS: Tendencia:${ta.trend} Señales:${ta.signals.bullish}/10 RSI14:${ta.rsi} MACD:${ta.macdLine} SMA50:${ta.sma50} SMA200:${ta.sma200} EMA9:${ta.ema9} EMA21:${ta.ema21} Señal:${ta.goldCross||'N/D'} Stoch%K:${ta.stochK||'N/D'} Stoch%D:${ta.stochD||'N/D'} StochZona:${ta.stochZone} OBV:${ta.obvTrend} BB:${ta.bbLower}-${ta.bbUpper} Fibonacci_más_cercano:${ta.fibClosest?.level}($${ta.fibClosest?.price}) Soportes:${ta.supports?.join('/')||'N/D'} Resistencias:${ta.resistances?.join('/')||'N/D'}`):'Sin datos técnicos.';
   const dateStr=new Date().toLocaleDateString('es-CL');
   return `${PROFILE}\n${rd}\n${taCtx}\n
@@ -816,9 +926,10 @@ async function startAnalysis(ticker) {
   currentTicker=ticker; showLoading(ticker);
   setLoadStep(0); const mkt=await fetchMarketData(ticker); currentMkt=mkt;
   setLoadStep(1); const ta=await fetchTechnicalData(ticker);
+  if (mkt && mkt.ok && mkt.change1y==null && ta && ta.ok && ta.change1y!=null) mkt.change1y=ta.change1y;
   setLoadStep(3);
   try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,messages:[{role:'user',content:buildPrompt(ticker,mkt,ta)}]})});
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:8000,messages:[{role:'user',content:buildPrompt(ticker,mkt,ta)}]})});
     if(!res.ok){const err=await res.json();throw new Error(err.error?.message||`Error ${res.status}`);}
     const raw=await res.json();
     let text=raw.content?.find(b=>b.type==='text')?.text||'';
@@ -871,7 +982,7 @@ function renderReport(data,mkt,ta) {
   const liveBadge=mkt?.ok
     ?(mkt.manual
       ?`<div class="live-badge warn">📋 Datos ingresados manualmente · Precio: <span class="price">$${mkt.currentPrice}</span> · Análisis basado en datos que tú proporcionaste</div>`
-      :`<div class="live-badge ok">🟢 Tiempo real <span class="price">$${mkt.currentPrice}</span> · ${mkt.marketCap} · P/E: ${mkt.peTTM||'N/D'} · Yahoo Finance vía Vercel ${mkt.fetchedAt}</div>`)
+      :`<div class="live-badge ok">🟢 Tiempo real <span class="price">$${mkt.currentPrice}</span> · ${mkt.marketCap} · P/E: ${mkt.peTTM||'N/D'} · ${mkt.source==='fmp'?'Financial Modeling Prep':'Yahoo Finance vía Vercel'} ${mkt.fetchedAt}</div>`)
     :`<div class="live-badge warn">⚠ Sin datos en tiempo real — usando estimaciones</div>`;
 
   // ── FUNDAMENTAL TAB ──
@@ -1131,7 +1242,7 @@ function renderReport(data,mkt,ta) {
     <div class="tab-content active" data-tab="fund">
       <div class="section"><div class="section-header"><div class="section-accent" style="background:var(--blue)"></div><span class="section-title">Segmentos de Negocio</span></div>${segsHTML}</div>
       <div class="section"><div class="section-header"><div class="section-accent" style="background:${vCol}"></div><span class="section-title">Análisis de Valuación</span><span class="badge" style="color:${vCol};border-color:${vCol}">${val.verdict}</span></div>
-        ${mkt?.ok?`<div class="data-source-note"><span style="color:var(--green)">●</span>Datos en tiempo real · Yahoo Finance · ${mkt.fetchedAt}${mkt.targetMeanPrice?` · Target analistas: <strong style="color:var(--white)">$${mkt.targetMeanPrice}</strong>`:''}</div>`:''}
+        ${mkt?.ok?`<div class="data-source-note"><span style="color:var(--green)">●</span>Datos en tiempo real · ${mkt.source==='fmp'?'Financial Modeling Prep':'Yahoo Finance'} · ${mkt.fetchedAt}${mkt.targetMeanPrice?` · Target analistas: <strong style="color:var(--white)">$${mkt.targetMeanPrice}</strong>`:''}</div>`:''}
         <div class="multiples">${multiplesHTML}</div>
         <div class="val-verdict" style="background:${vCol}18;border-left:3px solid ${vCol}">
           <div class="val-verdict-label" style="color:${vCol}">VALUACIÓN: ${val.verdict}</div>
@@ -1258,7 +1369,7 @@ function submitManualData() {
   fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,messages:[{role:'user',content:prompt}]})
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:8000,messages:[{role:'user',content:prompt}]})
   }).then(r=>{
     if(!r.ok) return r.json().then(e=>{throw new Error(e.error?.message||`Error ${r.status}`);});
     return r.json();

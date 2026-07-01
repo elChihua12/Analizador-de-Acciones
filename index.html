@@ -531,6 +531,21 @@ let history = [], cache = {}, currentTicker = '', currentMkt = null;
 const API_BASE = 'https://analizador-de-acciones.vercel.app';
 let loadStepInterval = null, activeTab = 'fund';
 
+/* ─── PANTALLAZO OPCIONAL (fundamentales frescos vía visión de Claude) ─── */
+let screenshot = null; // { media_type, data(base64) }
+function onScreenshotSelected(input){
+  const f = input.files && input.files[0];
+  const ind = document.getElementById('shotIndicator');
+  if(!f){ screenshot=null; if(ind) ind.textContent=''; return; }
+  if(!/^image\//.test(f.type)){ alert('Sube una imagen (PNG o JPG)'); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    screenshot = { media_type: f.type, data: String(e.target.result).split(',')[1] };
+    if(ind) ind.textContent = '✓ pantallazo cargado';
+  };
+  reader.readAsDataURL(f);
+}
+
 const WATCHLIST = [
   {ticker:'MSFT',label:'📋 Watchlist'},{ticker:'NOW',label:'📋 Watchlist'},{ticker:'AVGO',label:'📋 Watchlist'},
   {ticker:'GOOG',label:'📈 Plan'},{ticker:'MA',label:'📈 Plan'},{ticker:'GLD',label:'📈 Plan'},
@@ -617,9 +632,13 @@ function renderLanding() {
           onkeydown="if(event.key==='Enter') startAnalysis(this.value)">
         <button class="analyze-btn" onclick="startAnalysis(document.getElementById('tickerInput').value)">ANALIZAR →</button>
       </div>
-      <div style="text-align:right;margin-top:-8px;margin-bottom:20px;">
-        <span style="font-size:11px;color:var(--muted);">¿Sin datos en vivo? →</span>
-        <button onclick="openManualModal()" style="background:transparent;border:none;color:var(--blue);font-size:11px;cursor:pointer;text-decoration:underline;font-family:'JetBrains Mono',monospace;padding:0 4px;">Ingresar datos manualmente</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:-4px;margin-bottom:20px;">
+        <label style="display:inline-flex;align-items:center;gap:8px;font-size:11px;color:var(--blue);cursor:pointer;font-family:'JetBrains Mono',monospace;">
+          <span style="border:1px dashed rgba(64,196,255,.5);border-radius:5px;padding:5px 10px;">📷 Adjuntar pantallazo Yahoo (opcional)</span>
+          <input type="file" id="shotInput" accept="image/*" onchange="onScreenshotSelected(this)" style="display:none;">
+          <span id="shotIndicator" style="color:var(--green);font-family:'JetBrains Mono',monospace;"></span>
+        </label>
+        <button onclick="openManualModal()" style="background:transparent;border:none;color:var(--muted);font-size:11px;cursor:pointer;text-decoration:underline;font-family:'JetBrains Mono',monospace;padding:0 4px;">o ingresar datos manualmente</button>
       </div>
       <div class="chips-label">Acceso rápido</div>
       <div class="chips">${WATCHLIST.map(w=>`<div class="chip" onclick="startAnalysis('${w.ticker}')">${w.ticker}<span class="chip-label">${w.label}</span></div>`).join('')}</div>
@@ -944,13 +963,15 @@ async function fetchTechnicalData(ticker) {
 /* ─── PROMPT ─── */
 const PROFILE=`Eres el analista financiero personal de Bastián. QF chileno, inversor nivel 0-1, largo plazo 3-5+ años. Plataformas: Fintual + Interactive Brokers. Portafolio: Risky Norris 60% + planea GOOG, MA, GLD. Watchlist: NOW, AVGO, MSFT. Evitando: APO, ARKK, DUOL.`;
 
-function buildPrompt(ticker,mkt,ta) {
+function buildPrompt(ticker,mkt,ta,hasShot) {
   const isManualMkt = mkt?.manual;
   const rd=mkt?.ok?`${isManualMkt?'DATOS MANUALES (ingresados por el usuario)':(mkt.source==='fmp'?'DATOS REALES (Financial Modeling Prep)':'DATOS REALES YAHOO FINANCE')}: Empresa:${mkt.longName} Precio:$${mkt.currentPrice} MktCap:${mkt.marketCap||'N/D'} P/E TTM:${mkt.peTTM||'N/D'} P/E Fwd:${mkt.peForward||'N/D'} P/S:${mkt.priceToSales||'N/D'} EV/EBITDA:${mkt.evEbitda||'N/D'} Cambio1A:${mkt.change1y!=null?mkt.change1y+'%':'N/D'} 52w:$${mkt.low52w||'N/D'}-$${mkt.high52w||'N/D'} Rev:${mkt.totalRevenue||'N/D'} CrecYoY:${mkt.revenueGrowth||'N/D'} MargenNeto:${mkt.profitMargins||'N/D'} FCF:${mkt.freeCashflow||'N/D'} TargetAnalistas:$${mkt.targetMeanPrice||'N/D'}`:'Sin datos en tiempo real.';
   const taCtx=ta?.ok?(ta.manual?`DATOS TÉCNICOS BÁSICOS (manuales): Tendencia:${ta.trend} RSI14:${ta.rsi||'N/D'} PrecioSobreSMA50:${ta.aboveSMA50===true?'SÍ':ta.aboveSMA50===false?'NO':'N/D'} PrecioSobreSMA200:${ta.aboveSMA200===true?'SÍ':ta.aboveSMA200===false?'NO':'N/D'}. NOTA: Solo hay datos técnicos básicos; usa tu conocimiento del mercado para completar el análisis técnico detallado.`:`INDICADORES TÉCNICOS CALCULADOS: Tendencia:${ta.trend} Señales:${ta.signals.bullish}/10 RSI14:${ta.rsi} MACD:${ta.macdLine} SMA50:${ta.sma50} SMA200:${ta.sma200} EMA9:${ta.ema9} EMA21:${ta.ema21} Señal:${ta.goldCross||'N/D'} Stoch%K:${ta.stochK||'N/D'} Stoch%D:${ta.stochD||'N/D'} StochZona:${ta.stochZone} OBV:${ta.obvTrend} BB:${ta.bbLower}-${ta.bbUpper} Fibonacci_más_cercano:${ta.fibClosest?.level}($${ta.fibClosest?.price}) Soportes:${ta.supports?.join('/')||'N/D'} Resistencias:${ta.resistances?.join('/')||'N/D'}`):'Sin datos técnicos.';
   const dateStr=new Date().toLocaleDateString('es-CL');
-  return `${PROFILE}\n${rd}\n${taCtx}\n
-Analiza "${ticker}". DEVUELVE SOLO JSON sin markdown ni backticks:
+  const shotNote=hasShot?`\nSE ADJUNTA UN PANTALLAZO de Yahoo Finance con los fundamentales MÁS RECIENTES Y AUTORITATIVOS. Extrae de la imagen lo que veas (precio, market cap, P/E TTM y forward, P/S, EV/EBITDA, márgenes, revenue, FCF, 52w high/low, cambio 1A, target de analistas, próximos earnings) y ÚSALOS por sobre cualquier estimación. Lo que no aparezca en la imagen, complétalo con los datos en vivo o tu conocimiento e indícalo.`:'';
+  const rule=`\nREGLA: los indicadores técnicos ya vienen CALCULADOS con datos reales — NO los recalcules ni inventes, solo interprétalos. Si falta un dato fundamental, usa un rango y dilo; no inventes cifras exactas.`;
+  return `${PROFILE}\n${rd}\n${taCtx}${shotNote}${rule}\n
+Analiza "${ticker}". En "disclaimer" indica la fecha y la fuente de los fundamentales (pantallazo Yahoo / datos en vivo / estimación). DEVUELVE SOLO JSON sin markdown ni backticks:
 {"ticker":"${ticker}","company":"${mkt?.ok?mkt.longName:ticker}","tagline":"esencia 10 palabras","price":${mkt?.ok?mkt.currentPrice:0},"price_change_1y":${mkt?.ok&&mkt.change1y!=null?mkt.change1y:0},"market_cap":"${mkt?.ok?mkt.marketCap||'N/D':'N/D'}","sector":"sector","overview":{"description":"2-3 oraciones posición competitiva","why_now":"por qué analizar ahora"},"kpis":[{"label":"Revenue TTM","value":"${mkt?.ok?mkt.totalRevenue||'N/D':'N/D'}"},{"label":"Net Margin","value":"${mkt?.ok?mkt.profitMargins||'N/D':'N/D'}"},{"label":"Free Cash Flow","value":"${mkt?.ok?mkt.freeCashflow||'N/D':'N/D'}"},{"label":"YoY Growth","value":"${mkt?.ok?mkt.revenueGrowth||'N/D':'N/D'}"}],"segments":[{"name":"nombre","revenue_pct":número,"revenue_label":"$XB","growth":"+X%","margin":"X%","note":"1 oración","is_key":bool}],"valuation":{"pe_ttm":${mkt?.ok?mkt.peTTM||'null':'null'},"pe_forward":${mkt?.ok?mkt.peForward||'null':'null'},"ps_ratio":${mkt?.ok?mkt.priceToSales||1:1},"pb_ratio":${mkt?.ok?mkt.priceToBook||'null':'null'},"ev_ebitda":${mkt?.ok?mkt.evEbitda||'null':'null'},"verdict":"CARA|JUSTA|BARATA","verdict_color":"red|yellow|green","fair_value_low":número,"fair_value_high":número,"valuation_note":"1-2 oraciones"},"comps":[{"company":"nombre","ticker":"TICK","market_cap":"$XB","pe":número_o_null,"ps":número,"sector":"sector"}],"risks":[{"name":"nombre","score":1-10,"level":"LOW|MODERATE|ELEVATED|CRITICAL","description":"1-2 oraciones"}],"bull_case":["p1","p2","p3","p4"],"bear_case":["p1","p2","p3","p4"],"technical_note":"2-3 oraciones interpretando la situación técnica actual para un principiante, integrando tendencia+RSI+MACD","when_to_buy":{"timeframe":"AHORA|1-3 MESES|3-6 MESES|ESPERAR CORRECCIÓN","timeframe_color":"green|yellow|orange|red","ideal_entry":"descripción del punto de entrada ideal con precio aproximado y condición técnica/fundamental","price_targets":[{"label":"Entrada agresiva","price":número,"note":"condición y justificación"},{"label":"Entrada ideal","price":número,"note":"mejor precio/riesgo"},{"label":"Entrada conservadora","price":número,"note":"con margen de seguridad"}],"triggers":["catalizador 1 que confirmaría compra","catalizador 2","catalizador 3"],"avoid_if":["condición 1 que haría no comprar","condición 2","condición 3"],"summary":"2-3 oraciones con el timing concreto para Bastián"},"verdict":{"action":"COMPRAR|ESPERAR|EVITAR","action_color":"green|yellow|red","conviction_score":1-10,"summary":"2-3 oraciones","platform":"Fintual|Interactive Brokers|Cualquiera","platform_reason":"1 oración","position_size":"X-Y% portafolio","action_today":"1 acción en 5 minutos"},"portfolio_connection":"2-3 oraciones con Risky Norris y plan GOOG+MA+GLD","overall_risk_level":"BAJO|MEDIO|ALTO","disclaimer":"Datos en tiempo real ${dateStr}. No es asesoría financiera."}`;
 }
 
@@ -966,7 +987,10 @@ async function startAnalysis(ticker) {
   if (mkt && mkt.ok && mkt.change1y==null && ta && ta.ok && ta.change1y!=null) mkt.change1y=ta.change1y;
   setLoadStep(3);
   try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:8000,messages:[{role:'user',content:buildPrompt(ticker,mkt,ta)}]})});
+    const _content = screenshot
+      ? [{type:'image',source:{type:'base64',media_type:screenshot.media_type,data:screenshot.data}},{type:'text',text:buildPrompt(ticker,mkt,ta,true)}]
+      : buildPrompt(ticker,mkt,ta,false);
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:8000,messages:[{role:'user',content:_content}]})});
     if(!res.ok){const err=await res.json();throw new Error(err.error?.message||`Error ${res.status}`);}
     const raw=await res.json();
     let text=raw.content?.find(b=>b.type==='text')?.text||'';

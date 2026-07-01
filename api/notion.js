@@ -12,7 +12,28 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const token = process.env.NOTION_TOKEN;
-  if (!token) return res.status(500).json({ error: 'Falta NOTION_TOKEN en Vercel (Settings → Environment Variables)' });
+
+  // ── Diagnóstico: abre /api/notion?diag=1 en el navegador para ver qué detecta el servidor.
+  //    No revela el valor del token; solo si existe, su largo, su nombre y el entorno. ──
+  if (req.query.diag !== undefined) {
+    return res.status(200).json({
+      NOTION_TOKEN_detectada: typeof token === 'string' && token.length > 0,
+      NOTION_TOKEN_largo: token ? token.length : 0,
+      empieza_con_ntn: token ? token.slice(0, 4) === 'ntn_' : false,
+      variables_con_notion: Object.keys(process.env).filter(k => /notion/i.test(k)),
+      entorno_actual: process.env.VERCEL_ENV || 'desconocido',
+      pista: (token && token.length)
+        ? 'Token presente. Si el Selector aún falla, revisa que empiece con ntn_ y que la integración esté compartida con cada base (··· → Conexiones).'
+        : 'El servidor NO ve el token. Causas posibles: (1) el nombre no es exactamente NOTION_TOKEN (mayúsculas/espacios), (2) se guardó en otro entorno y no en Production, (3) el valor quedó vacío, (4) no se hizo un deploy NUEVO después de guardarla.',
+    });
+  }
+
+  if (!token) return res.status(500).json({
+    error: 'Falta NOTION_TOKEN en Vercel (Settings → Environment Variables)',
+    variables_con_notion: Object.keys(process.env).filter(k => /notion/i.test(k)),
+    entorno_actual: process.env.VERCEL_ENV || 'desconocido',
+    ayuda: 'Abre /api/notion?diag=1 para diagnosticar. Suele ser: nombre distinto a NOTION_TOKEN, entorno equivocado (debe incluir Production), o valor vacío.',
+  });
 
   const id = String(req.query.ds || '').replace('collection://', '').replace(/-/g, '').trim();
   if (!id) return res.status(400).json({ error: 'Falta el parámetro ds (id de la base/data source)' });

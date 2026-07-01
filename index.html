@@ -346,6 +346,7 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
       <span class="nav-label">BASTIÁN · EQUITY RESEARCH</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
+      <button class="nav-btn" id="settingsBtn" onclick="toggleSettings()" title="API Keys / Ajustes">⚙ Ajustes</button>
       <button class="save-pdf-btn" id="savePdfBtn" onclick="savePDF()">💾 Guardar PDF</button>
       <button class="nav-btn" id="navBack" style="display:none" onclick="showLanding()">← Nueva búsqueda</button>
     </div>
@@ -364,6 +365,7 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
       <input type="password" class="api-key-input" id="fmpKeyInput" placeholder="tu API key de FMP">
       <button class="save-btn" onclick="saveFmpKey()">GUARDAR</button>
     </div>
+    <div id="fmpStatus" style="font-size:12px;margin-top:6px;min-height:16px;"></div>
   </div>
 
   <div class="history-bar" id="historyBar" style="display:none">
@@ -522,10 +524,11 @@ let history = [], cache = {}, currentTicker = '', currentMkt = null;
    no existen, así que el Analizador cae a modo manual + estimaciones (sigue funcionando).
    Para tener datos en vivo TAMBIÉN desde GitHub Pages, pega aquí la URL base de tu backend en
    Vercel, ej: const API_BASE = 'https://tu-analizador.vercel.app';  (requiere CORS habilitado). */
-/* Servido DESDE Vercel: el backend (api/quote.js, api/history.js) vive en el mismo dominio,
-   así que las llamadas son mismo-origen (API_BASE vacío = ruta relativa /api/...).
-   Orden de fuentes: 1º FMP si hay API key (⚙), 2º proxy Yahoo mismo-origen, 3º modo manual. */
-const API_BASE = '';
+/* Datos en vivo (Yahoo) vía backend serverless en Vercel (repo Analizador-de-Acciones).
+   api/quote.js y api/history.js proxean Yahoo Finance con CORS abierto, así que funciona
+   desde GitHub Pages sin exponer nada. Si algún día cae Yahoo, el usuario puede pegar una
+   API key de Financial Modeling Prep en ⚙ y usa esa fuente; si no hay ninguna, cae a modo manual. */
+const API_BASE = 'https://analizador-de-acciones.vercel.app';
 let loadStepInterval = null, activeTab = 'fund';
 
 const WATCHLIST = [
@@ -552,11 +555,43 @@ function saveApiKey() {
   if(v){ apiKey=v; localStorage.setItem('panel.v5.api_key',v); localStorage.setItem('bastian_api_key',v); document.getElementById('settingsPanel').style.display='none'; alert('✅ API Key guardada'); }
 }
 
-function saveFmpKey() {
+// Abre/cierra el panel de Ajustes (siempre accesible desde el botón ⚙ del header)
+function toggleSettings() {
+  const p = document.getElementById('settingsPanel');
+  p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
+}
+
+// Guarda la key de FMP VERIFICÁNDOLA contra el servicio (mismo endpoint que usa el análisis).
+async function saveFmpKey() {
   const v = document.getElementById('fmpKeyInput').value.trim();
-  fmpKey = v;
-  if(v){ localStorage.setItem('panel.v5.fmp_key',v); localStorage.setItem('bastian_fmp_key',v); alert('✅ API Key de datos guardada · datos en vivo activos'); }
-  else { localStorage.removeItem('panel.v5.fmp_key'); localStorage.removeItem('bastian_fmp_key'); alert('API Key de datos borrada · modo manual'); }
+  const status = document.getElementById('fmpStatus');
+  const setStatus = (msg,color) => { if(status){ status.textContent=msg; status.style.color=color; } };
+  if(!v){
+    fmpKey='';
+    localStorage.removeItem('panel.v5.fmp_key'); localStorage.removeItem('bastian_fmp_key');
+    setStatus('Key borrada · modo manual','#888');
+    return;
+  }
+  setStatus('Verificando la key…','#ffd740');
+  let ok=false, errMsg=null, httpStatus=null;
+  for(const u of [
+    `https://financialmodelingprep.com/stable/quote?symbol=AAPL&apikey=${encodeURIComponent(v)}`,
+    `https://financialmodelingprep.com/api/v3/quote/AAPL?apikey=${encodeURIComponent(v)}`
+  ]){
+    try{
+      const r = await fetch(u); httpStatus = r.status;
+      const j = await r.json().catch(()=>null);
+      if(j && (j['Error Message'] || j.error)) errMsg = j['Error Message'] || j.error;
+      if(r.ok && Array.isArray(j) && j.length && j[0] && j[0].price != null){ ok=true; break; }
+    }catch(e){ errMsg = e.message; }
+  }
+  if(ok){
+    fmpKey=v;
+    localStorage.setItem('panel.v5.fmp_key',v); localStorage.setItem('bastian_fmp_key',v);
+    setStatus('✓ Key válida · datos en vivo activos','#00e676');
+  } else {
+    setStatus('✗ '+(errMsg || `Key inválida o sin acceso (HTTP ${httpStatus||'?'})`),'#ff5252');
+  }
 }
 
 /* ─── SCREENS ─── */
@@ -714,6 +749,7 @@ async function fmpSeries(ticker) {
 /* ─── DATOS DE MERCADO — FMP directo, con fallback a proxy Vercel→Yahoo ─── */
 async function fetchMarketData(ticker) {
   if (fmpKey) { const fmp = await fetchMarketDataFMP(ticker); if (fmp && fmp.ok) return fmp; }
+  if (!API_BASE) return { ok:false, error:'sin-fuente' }; // sin FMP y sin proxy → no hay datos en vivo, cae a estimaciones
   try {
     const res = await fetch(`${API_BASE}/api/quote?ticker=${ticker}`, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(`Error ${res.status}`);
@@ -758,6 +794,7 @@ async function fetchTechnicalData(ticker) {
       const s = await fmpSeries(ticker);
       closes = s.closes; volumes = s.volumes; highs = s.highs; lows = s.lows;
     } else {
+      if (!API_BASE) throw new Error('sin-fuente');
       const res = await fetch(`${API_BASE}/api/history?ticker=${ticker}`, { signal: AbortSignal.timeout(12000) });
       if (!res.ok) throw new Error(`Error ${res.status}`);
       const json = await res.json();

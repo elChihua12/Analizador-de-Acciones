@@ -1,67 +1,56 @@
-export default async function handler(req, res) {
+// api/quote.js — Proxy Vercel → Twelve Data (precio + rango 52 semanas)
+// Reemplaza a Yahoo Finance. La API key va en la env var TWELVEDATA_API_KEY.
+//
+// Devuelve EXACTAMENTE el mismo formato que Yahoo (quoteSummary.result[0]) para no
+// tocar el parser de index.html. Los números van envueltos en { raw: valor } igual
+// que Yahoo.
+//
+// NOTA: el plan GRATIS de Twelve Data no incluye P/E, market cap ni márgenes; esos
+// campos van vacíos y se completan con el PANTALLAZO de Yahoo (visión de Claude) o,
+// si no hay pantallazo, con el conocimiento de Claude.
+
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET');
- 
-  const { ticker } = req.query;
-  if (!ticker) return res.status(400).json({ error: 'ticker requerido' });
- 
-  const BASE_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': '*/*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Referer': 'https://finance.yahoo.com/',
-    'Origin': 'https://finance.yahoo.com',
-  };
- 
-  const modules = 'price,summaryDetail,defaultKeyStatistics,financialData';
- 
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const ticker = (req.query.ticker || '').toString().trim().toUpperCase();
+  const KEY = process.env.TWELVEDATA_API_KEY;
+  if (!ticker) return res.status(400).json({ error: 'Falta el parámetro ticker' });
+  if (!KEY)    return res.status(500).json({ error: 'Falta TWELVEDATA_API_KEY en Vercel' });
+
   try {
-    // Paso 1: obtener crumb y cookie de sesión
-    const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-      headers: BASE_HEADERS,
-    });
- 
-    if (crumbRes.ok) {
-      const crumb = await crumbRes.text();
-      const cookies = crumbRes.headers.get('set-cookie') || '';
- 
-      // Paso 2: llamar con crumb + cookie
-      const urls = [
-        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`,
-        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`,
-      ];
- 
-      for (const url of urls) {
-        try {
-          const r = await fetch(url, {
-            headers: { ...BASE_HEADERS, Cookie: cookies },
-          });
-          if (!r.ok) continue;
-          const data = await r.json();
-          if (data?.quoteSummary?.result?.[0]) return res.json(data);
-        } catch { continue; }
-      }
+    const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(ticker)}&apikey=${KEY}`;
+    const r = await fetch(url);
+    const j = await r.json();
+
+    if (!j || j.status === 'error' || j.close == null) {
+      return res.status(502).json({ error: (j && j.message) || 'Ticker no encontrado' });
     }
- 
-    // Fallback sin crumb
-    const fallbackUrls = [
-      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`,
-      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`,
-    ];
- 
-    for (const url of fallbackUrls) {
-      try {
-        const r = await fetch(url, { headers: BASE_HEADERS });
-        if (!r.ok) continue;
-        const data = await r.json();
-        if (data?.quoteSummary?.result?.[0]) return res.json(data);
-      } catch { continue; }
-    }
- 
+
+    const num  = v => (v == null || v === '' || isNaN(v) ? null : Number(v));
+    const wrap = v => (v == null ? undefined : { raw: v });   // formato Yahoo { raw }
+    const fw = j.fifty_two_week || {};
+
+    const payload = {
+      quoteSummary: { result: [ {
+        price: {
+          longName:  j.name || ticker,
+          shortName: j.name || ticker,
+          currency:  j.currency || 'USD',
+          regularMarketPrice: wrap(num(j.close)),
+        },
+        summaryDetail: {
+          fiftyTwoWeekHigh: wrap(num(fw.high)),
+          fiftyTwoWeekLow:  wrap(num(fw.low)),
+        },
+        defaultKeyStatistics: {},   // sin fundamentales en el free tier → pantallazo/Claude
+        financialData: {},
+      } ] }
+    };
+
+    res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=3600');
+    return res.status(200).json(payload);
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    return res.status(502).json({ error: e.message || 'Error consultando Twelve Data' });
   }
- 
-  return res.status(502).json({ error: 'Yahoo Finance no respondió' });
-}
+};

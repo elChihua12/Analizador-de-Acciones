@@ -1,62 +1,51 @@
-export default async function handler(req, res) {
+// api/history.js — Proxy Vercel → Twelve Data (histórico diario para análisis técnico)
+// Reemplaza a Yahoo Finance (que bloquea las IP de Vercel con 502).
+// La API key va en la variable de entorno TWELVEDATA_API_KEY
+// (Vercel → Project → Settings → Environment Variables). NUNCA se expone al browser.
+//
+// Devuelve EXACTAMENTE el mismo formato que Yahoo (chart.result[0].indicators.quote[0])
+// para que el index.html NO necesite cambios en su parser.
+
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET');
- 
-  const { ticker } = req.query;
-  if (!ticker) return res.status(400).json({ error: 'ticker requerido' });
- 
-  const BASE_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': '*/*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Referer': 'https://finance.yahoo.com/',
-    'Origin': 'https://finance.yahoo.com',
-  };
- 
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const ticker = (req.query.ticker || '').toString().trim().toUpperCase();
+  const KEY = process.env.TWELVEDATA_API_KEY;
+  if (!ticker) return res.status(400).json({ error: 'Falta el parámetro ticker' });
+  if (!KEY)    return res.status(500).json({ error: 'Falta TWELVEDATA_API_KEY en Vercel' });
+
   try {
-    // Paso 1: crumb
-    const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-      headers: BASE_HEADERS,
-    });
- 
-    if (crumbRes.ok) {
-      const crumb = await crumbRes.text();
-      const cookies = crumbRes.headers.get('set-cookie') || '';
- 
-      const urls = [
-        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y&crumb=${encodeURIComponent(crumb)}`,
-        `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y&crumb=${encodeURIComponent(crumb)}`,
-      ];
- 
-      for (const url of urls) {
-        try {
-          const r = await fetch(url, { headers: { ...BASE_HEADERS, Cookie: cookies } });
-          if (!r.ok) continue;
-          const data = await r.json();
-          if (data?.chart?.result?.[0]) return res.json(data);
-        } catch { continue; }
-      }
+    const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(ticker)}` +
+                `&interval=1day&outputsize=320&apikey=${KEY}`;
+    const r = await fetch(url);
+    const j = await r.json();
+
+    if (!j || j.status === 'error' || !Array.isArray(j.values) || !j.values.length) {
+      return res.status(502).json({ error: (j && j.message) || 'Sin datos históricos' });
     }
- 
-    // Fallback sin crumb
-    const fallbackUrls = [
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`,
-      `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`,
-    ];
- 
-    for (const url of fallbackUrls) {
-      try {
-        const r = await fetch(url, { headers: BASE_HEADERS });
-        if (!r.ok) continue;
-        const data = await r.json();
-        if (data?.chart?.result?.[0]) return res.json(data);
-      } catch { continue; }
-    }
- 
+
+    // Twelve Data entrega del más NUEVO al más VIEJO → invertimos a viejo→nuevo
+    const rows = j.values.slice().reverse();
+    const num = v => (v == null || v === '' ? null : Number(v));
+
+    const payload = {
+      chart: { result: [ {
+        meta: { symbol: ticker, source: 'twelvedata' },
+        indicators: { quote: [ {
+          close:  rows.map(d => num(d.close)),
+          open:   rows.map(d => num(d.open)),
+          high:   rows.map(d => num(d.high)),
+          low:    rows.map(d => num(d.low)),
+          volume: rows.map(d => num(d.volume)),
+        } ] }
+      } ] }
+    };
+
+    // Cachea 1 h en el edge → cuida el presupuesto de 800 llamadas/día
+    res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
+    return res.status(200).json(payload);
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    return res.status(502).json({ error: e.message || 'Error consultando Twelve Data' });
   }
- 
-  return res.status(502).json({ error: 'Yahoo Finance histórico no respondió' });
-}
+};

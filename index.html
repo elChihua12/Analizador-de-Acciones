@@ -359,13 +359,7 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
       <input type="password" class="api-key-input" id="apiKeyInput" placeholder="sk-ant-api03-...">
       <button class="save-btn" onclick="saveApiKey()">GUARDAR</button>
     </div>
-    <h3 style="margin-top:18px">📈 API Key de datos · Financial Modeling Prep</h3>
-    <p>Datos de mercado en vivo sin servidor (funciona en GitHub Pages). Gratis en <a href="https://site.financialmodelingprep.com/developer/docs" target="_blank">financialmodelingprep.com</a> · 250 consultas/día. Opcional: sin ella, usa modo manual. Se comparte con el panel.</p>
-    <div class="api-key-row">
-      <input type="password" class="api-key-input" id="fmpKeyInput" placeholder="tu API key de FMP">
-      <button class="save-btn" onclick="saveFmpKey()">GUARDAR</button>
-    </div>
-    <div id="fmpStatus" style="font-size:12px;margin-top:6px;min-height:16px;"></div>
+    <p style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.6;">📈 Los datos de mercado (precio e histórico para el análisis técnico) vienen automáticamente de <strong style="color:var(--text)">Twelve Data</strong> vía Vercel — no necesitas ingresar ninguna key de datos aquí. Para los fundamentales, adjunta el 📷 pantallazo de Yahoo en la pantalla de inicio.</p>
   </div>
 
   <div class="history-bar" id="historyBar" style="display:none">
@@ -518,7 +512,7 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
 <script>
 /* ─── STATE ─── */
 let apiKey = localStorage.getItem('panel.v5.api_key') || localStorage.getItem('bastian_api_key') || '';
-let fmpKey = localStorage.getItem('panel.v5.fmp_key') || localStorage.getItem('bastian_fmp_key') || '';
+let fmpKey = ''; // FMP descartado — la fuente de datos es Twelve Data (server-side en Vercel)
 let history = [], cache = {}, currentTicker = '', currentMkt = null;
 /* Datos en vivo (Yahoo) vía backend serverless. En GitHub Pages (sitio estático) las rutas /api/*
    no existen, así que el Analizador cae a modo manual + estimaciones (sigue funcionando).
@@ -561,7 +555,7 @@ window.onload = () => {
   const ak=document.getElementById('apiKeyInput'); if(ak&&apiKey) ak.value=apiKey;
   const fk=document.getElementById('fmpKeyInput'); if(fk&&fmpKey) fk.value=fmpKey;
   // Abre Ajustes si falta la key de Claude (obligatoria) o la de FMP (datos en vivo)
-  if(!apiKey || !fmpKey) document.getElementById('settingsPanel').style.display='block';
+  if(!apiKey) document.getElementById('settingsPanel').style.display='block';
   showLanding();
 };
 
@@ -770,7 +764,7 @@ async function fetchMarketData(ticker) {
   if (fmpKey) { const fmp = await fetchMarketDataFMP(ticker); if (fmp && fmp.ok) return fmp; }
   if (!API_BASE) return { ok:false, error:'sin-fuente' }; // sin FMP y sin proxy → no hay datos en vivo, cae a estimaciones
   try {
-    const res = await fetch(`${API_BASE}/api/quote?ticker=${ticker}`, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(`${API_BASE}/api/quote?ticker=${ticker}`, { signal: AbortSignal.timeout(25000) });
     if (!res.ok) throw new Error(`Error ${res.status}`);
     const json = await res.json();
     const r = json?.quoteSummary?.result?.[0];
@@ -814,7 +808,7 @@ async function fetchTechnicalData(ticker) {
       closes = s.closes; volumes = s.volumes; highs = s.highs; lows = s.lows;
     } else {
       if (!API_BASE) throw new Error('sin-fuente');
-      const res = await fetch(`${API_BASE}/api/history?ticker=${ticker}`, { signal: AbortSignal.timeout(12000) });
+      const res = await fetch(`${API_BASE}/api/history?ticker=${ticker}`, { signal: AbortSignal.timeout(30000) });
       if (!res.ok) throw new Error(`Error ${res.status}`);
       const json = await res.json();
       const r = json?.chart?.result?.[0];
@@ -965,7 +959,7 @@ const PROFILE=`Eres el analista financiero personal de Bastián. QF chileno, inv
 
 function buildPrompt(ticker,mkt,ta,hasShot) {
   const isManualMkt = mkt?.manual;
-  const rd=mkt?.ok?`${isManualMkt?'DATOS MANUALES (ingresados por el usuario)':(mkt.source==='fmp'?'DATOS REALES (Financial Modeling Prep)':'DATOS REALES YAHOO FINANCE')}: Empresa:${mkt.longName} Precio:$${mkt.currentPrice} MktCap:${mkt.marketCap||'N/D'} P/E TTM:${mkt.peTTM||'N/D'} P/E Fwd:${mkt.peForward||'N/D'} P/S:${mkt.priceToSales||'N/D'} EV/EBITDA:${mkt.evEbitda||'N/D'} Cambio1A:${mkt.change1y!=null?mkt.change1y+'%':'N/D'} 52w:$${mkt.low52w||'N/D'}-$${mkt.high52w||'N/D'} Rev:${mkt.totalRevenue||'N/D'} CrecYoY:${mkt.revenueGrowth||'N/D'} MargenNeto:${mkt.profitMargins||'N/D'} FCF:${mkt.freeCashflow||'N/D'} TargetAnalistas:$${mkt.targetMeanPrice||'N/D'}`:'Sin datos en tiempo real.';
+  const rd=mkt?.ok?`${isManualMkt?'DATOS MANUALES (ingresados por el usuario)':(mkt.source==='fmp'?'DATOS REALES (Financial Modeling Prep)':'DATOS DE MERCADO EN VIVO (Twelve Data): el precio y el rango 52s son reales; market cap, P/E, márgenes, revenue, FCF y target vienen del pantallazo de Yahoo o de tu conocimiento — trátalos como aproximados salvo que vengan del pantallazo')}: Empresa:${mkt.longName} Precio:$${mkt.currentPrice} MktCap:${mkt.marketCap||'N/D'} P/E TTM:${mkt.peTTM||'N/D'} P/E Fwd:${mkt.peForward||'N/D'} P/S:${mkt.priceToSales||'N/D'} EV/EBITDA:${mkt.evEbitda||'N/D'} Cambio1A:${mkt.change1y!=null?mkt.change1y+'%':'N/D'} 52w:$${mkt.low52w||'N/D'}-$${mkt.high52w||'N/D'} Rev:${mkt.totalRevenue||'N/D'} CrecYoY:${mkt.revenueGrowth||'N/D'} MargenNeto:${mkt.profitMargins||'N/D'} FCF:${mkt.freeCashflow||'N/D'} TargetAnalistas:$${mkt.targetMeanPrice||'N/D'}`:'Sin datos en tiempo real.';
   const taCtx=ta?.ok?(ta.manual?`DATOS TÉCNICOS BÁSICOS (manuales): Tendencia:${ta.trend} RSI14:${ta.rsi||'N/D'} PrecioSobreSMA50:${ta.aboveSMA50===true?'SÍ':ta.aboveSMA50===false?'NO':'N/D'} PrecioSobreSMA200:${ta.aboveSMA200===true?'SÍ':ta.aboveSMA200===false?'NO':'N/D'}. NOTA: Solo hay datos técnicos básicos; usa tu conocimiento del mercado para completar el análisis técnico detallado.`:`INDICADORES TÉCNICOS CALCULADOS: Tendencia:${ta.trend} Señales:${ta.signals.bullish}/10 RSI14:${ta.rsi} MACD:${ta.macdLine} SMA50:${ta.sma50} SMA200:${ta.sma200} EMA9:${ta.ema9} EMA21:${ta.ema21} Señal:${ta.goldCross||'N/D'} Stoch%K:${ta.stochK||'N/D'} Stoch%D:${ta.stochD||'N/D'} StochZona:${ta.stochZone} OBV:${ta.obvTrend} BB:${ta.bbLower}-${ta.bbUpper} Fibonacci_más_cercano:${ta.fibClosest?.level}($${ta.fibClosest?.price}) Soportes:${ta.supports?.join('/')||'N/D'} Resistencias:${ta.resistances?.join('/')||'N/D'}`):'Sin datos técnicos.';
   const dateStr=new Date().toLocaleDateString('es-CL');
   const shotNote=hasShot?`\nSE ADJUNTA UN PANTALLAZO de Yahoo Finance con los fundamentales MÁS RECIENTES Y AUTORITATIVOS. Extrae de la imagen lo que veas (precio, market cap, P/E TTM y forward, P/S, EV/EBITDA, márgenes, revenue, FCF, 52w high/low, cambio 1A, target de analistas, próximos earnings) y ÚSALOS por sobre cualquier estimación. Lo que no aparezca en la imagen, complétalo con los datos en vivo o tu conocimiento e indícalo.`:'';
@@ -1043,7 +1037,7 @@ function renderReport(data,mkt,ta) {
   const liveBadge=mkt?.ok
     ?(mkt.manual
       ?`<div class="live-badge warn">📋 Datos ingresados manualmente · Precio: <span class="price">$${mkt.currentPrice}</span> · Análisis basado en datos que tú proporcionaste</div>`
-      :`<div class="live-badge ok">🟢 Tiempo real <span class="price">$${mkt.currentPrice}</span> · ${mkt.marketCap} · P/E: ${mkt.peTTM||'N/D'} · ${mkt.source==='fmp'?'Financial Modeling Prep':'Yahoo Finance vía Vercel'} ${mkt.fetchedAt}</div>`)
+      :`<div class="live-badge ok">🟢 Tiempo real <span class="price">$${mkt.currentPrice}</span>${mkt.marketCap?` · ${mkt.marketCap}`:''} · Datos: Twelve Data · ${mkt.fetchedAt}</div>`)
     :`<div class="live-badge warn">⚠ Sin datos en tiempo real — usando estimaciones</div>`;
 
   // ── FUNDAMENTAL TAB ──
@@ -1303,7 +1297,7 @@ function renderReport(data,mkt,ta) {
     <div class="tab-content active" data-tab="fund">
       <div class="section"><div class="section-header"><div class="section-accent" style="background:var(--blue)"></div><span class="section-title">Segmentos de Negocio</span></div>${segsHTML}</div>
       <div class="section"><div class="section-header"><div class="section-accent" style="background:${vCol}"></div><span class="section-title">Análisis de Valuación</span><span class="badge" style="color:${vCol};border-color:${vCol}">${val.verdict}</span></div>
-        ${mkt?.ok?`<div class="data-source-note"><span style="color:var(--green)">●</span>Datos en tiempo real · ${mkt.source==='fmp'?'Financial Modeling Prep':'Yahoo Finance'} · ${mkt.fetchedAt}${mkt.targetMeanPrice?` · Target analistas: <strong style="color:var(--white)">$${mkt.targetMeanPrice}</strong>`:''}</div>`:''}
+        ${mkt?.ok?`<div class="data-source-note"><span style="color:var(--green)">●</span>Datos en tiempo real · Twelve Data · ${mkt.fetchedAt}${mkt.targetMeanPrice?` · Target analistas: <strong style="color:var(--white)">$${mkt.targetMeanPrice}</strong>`:''}</div>`:''}
         <div class="multiples">${multiplesHTML}</div>
         <div class="val-verdict" style="background:${vCol}18;border-left:3px solid ${vCol}">
           <div class="val-verdict-label" style="color:${vCol}">VALUACIÓN: ${val.verdict}</div>
@@ -1447,20 +1441,23 @@ function submitManualData() {
 
 /* ─── SAVE PDF ─── */
 function savePDF() {
-  // Make all tabs visible before printing
-  document.querySelectorAll('.tab-content').forEach(el=>el.setAttribute('data-print-visible', el.classList.contains('active')?'active':''));
-  document.querySelectorAll('.tab-content').forEach(el=>el.style.display='block');
-  const title = currentTicker ? `Análisis ${currentTicker} · Bastián Equity Research` : 'Bastián · Equity Research';
+  // Guarda qué pestaña estaba activa y expande todas para imprimir
+  const tabs = document.querySelectorAll('.tab-content');
+  tabs.forEach(el => { el.dataset.printVisible = el.classList.contains('active') ? 'active' : ''; el.style.display = 'block'; });
   const prevTitle = document.title;
-  document.title = title;
-  window.print();
-  document.title = prevTitle;
-  // Restore tabs
-  setTimeout(()=>{
-    document.querySelectorAll('.tab-content').forEach(el=>{
-      el.style.display = el.dataset.printVisible==='active' ? 'block' : 'none';
-    });
-  }, 500);
+  document.title = currentTicker ? `Análisis ${currentTicker} · Bastián Equity Research` : 'Bastián · Equity Research';
+
+  // Restaura al CERRAR el diálogo de impresión (más fiable que un setTimeout fijo)
+  const restore = () => {
+    tabs.forEach(el => { el.style.display = el.dataset.printVisible === 'active' ? 'block' : 'none'; });
+    document.title = prevTitle;
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+
+  // Saca window.print() del handler del clic: el botón responde al instante y
+  // Chrome deja de marcar el "INP issue" (el diálogo ya no bloquea la interacción).
+  setTimeout(() => { try { window.print(); } catch(e){ restore(); } }, 60);
 }
 </script>
 </html>

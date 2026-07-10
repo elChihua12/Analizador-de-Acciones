@@ -5,6 +5,12 @@
 //  Consulta la API REST de Notion y devuelve las filas aplanadas,
 //  con CORS abierto para que GitHub Pages pueda llamarlo.
 // ─────────────────────────────────────────────────────────────
+
+// Amplía el tiempo máximo de ejecución de la función serverless.
+// Necesario para paginar bases grandes: cada página es un viaje a Notion.
+// 60 s es el tope en el plan Hobby de Vercel (en Pro puede subir más).
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
@@ -51,23 +57,51 @@ export default async function handler(req, res) {
   let lastErr = null;
   for (const a of attempts) {
     try {
-      const r = await fetch(a.url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Notion-Version': a.ver,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ page_size: 100 }),
-      });
-      const data = await r.json();
-      if (r.ok) {
-        const items = (data.results || []).map(flatten);
-        return res.status(200).json({ items, source: a.ver });
+      // ── Paginación completa: recorre TODA la base, no solo las primeras 100 filas.
+      //    Notion entrega máx. 100 por request; se sigue el cursor mientras has_more sea true.
+      const results = [];
+      let cursor = undefined;
+      let okFormat = false;
+
+      // Tope de seguridad: 200 páginas = 20.000 filas. Freno anti-loop-infinito;
+      // el límite real es el timeout de la función (ver maxDuration arriba).
+      for (let page = 0; page < 200; page++) {
+        const body = { page_size: 100 };
+        if (cursor) body.start_cursor = cursor;
+
+        const r = await fetch(a.url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Notion-Version': a.ver,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+
+        if (!r.ok) {
+          if (page === 0) {
+            lastErr = { status: r.status, code: data?.code, message: data?.message };
+          }
+          break;
+        }
+
+        okFormat = true;
+        for (const row of (data.results || [])) results.push(flatten(row));
+
+        if (data.has_more && data.next_cursor) {
+          cursor = data.next_cursor;
+        } else {
+          break;
+        }
       }
-      lastErr = { status: r.status, code: data?.code, message: data?.message };
+
+      if (okFormat) {
+        return res.status(200).json({ items: results, source: a.ver, count: results.length });
+      }
       // si es "no encontrado", prueba el siguiente formato; si es auth/otro, corta
-      if (data?.code !== 'object_not_found') break;
+      if (lastErr?.code && lastErr.code !== 'object_not_found') break;
     } catch (e) {
       lastErr = { message: e.message };
     }

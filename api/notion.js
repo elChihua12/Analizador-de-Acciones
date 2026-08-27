@@ -12,6 +12,15 @@
 export const config = { maxDuration: 60 };
 
 export default async function handler(req, res) {
+  // ── Control de tiempo ──────────────────────────────────────
+  // vercel.json ahora concede 60 s (tope del plan Hobby). Paginamos con un
+  // presupuesto de 50 s para devolver algo SIEMPRE, en vez de morir con 504.
+  // OJO: los dos numeros deben moverse juntos. Si vercel.json vuelve a 30,
+  // este presupuesto tiene que bajar a ~20000 o el 504 regresa.
+  const T0 = Date.now();
+  const PRESUPUESTO_MS = 50000;
+  const MAX_PAGES = Number(req.query.max) > 0 ? Number(req.query.max) : 200;
+
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -62,10 +71,16 @@ export default async function handler(req, res) {
       const results = [];
       let cursor = undefined;
       let okFormat = false;
+      let parcial  = false;
+      let motivo   = null;
 
       // Tope de seguridad: 200 páginas = 20.000 filas. Freno anti-loop-infinito;
       // el límite real es el timeout de la función (ver maxDuration arriba).
-      for (let page = 0; page < 200; page++) {
+      for (let page = 0; page < MAX_PAGES; page++) {
+        // FRENO REAL: si nos acercamos al limite de la funcion, cortamos y
+        // devolvemos lo que alcanzamos. Mejor una lista parcial que un 504.
+        if (Date.now() - T0 > PRESUPUESTO_MS) { parcial = true; motivo = 'presupuesto de tiempo agotado'; break; }
+
         const body = { page_size: 100 };
         if (cursor) body.start_cursor = cursor;
 
@@ -83,6 +98,12 @@ export default async function handler(req, res) {
         if (!r.ok) {
           if (page === 0) {
             lastErr = { status: r.status, code: data?.code, message: data?.message };
+          } else {
+            // Fallo a mitad de la paginacion (429, corte de red, etc).
+            // ANTES esto devolvia una lista incompleta como si estuviera completa.
+            // Ahora queda marcado para no sortear sobre datos a medias.
+            parcial = true;
+            motivo  = `pagina ${page}: ${data?.code || r.status}`;
           }
           break;
         }
@@ -98,7 +119,19 @@ export default async function handler(req, res) {
       }
 
       if (okFormat) {
-        return res.status(200).json({ items: results, source: a.ver, count: results.length });
+        // Cache en el CDN de Vercel: la primera consulta paga el costo, las
+        // siguientes salen al instante. Agrega &fresh=1 para saltarse la cache.
+        res.setHeader('Cache-Control', req.query.fresh !== undefined
+          ? 'no-store'
+          : 's-maxage=3600, stale-while-revalidate=86400');
+        return res.status(200).json({
+          items: results,
+          source: a.ver,
+          count: results.length,
+          parcial,                       // true = la lista NO esta completa
+          motivo,                        // por que se corto
+          ms: Date.now() - T0,
+        });
       }
       // si es "no encontrado", prueba el siguiente formato; si es auth/otro, corta
       if (lastErr?.code && lastErr.code !== 'object_not_found') break;

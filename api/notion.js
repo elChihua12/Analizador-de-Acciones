@@ -57,14 +57,29 @@ export default async function handler(req, res) {
     ? `${id.slice(0,8)}-${id.slice(8,12)}-${id.slice(12,16)}-${id.slice(16,20)}-${id.slice(20)}`
     : id;
 
-  // Intenta como database (API clásica) y, si no existe, como data source (API nueva).
+  // Intenta como database (API clásica) y como data source (API nueva).
+  // Si el id viene como collection:// es un data source: se prueba ese primero
+  // y nos ahorramos un viaje perdido a Notion en cada consulta.
+  const esDataSource = String(req.query.ds || '').startsWith('collection://');
   const attempts = [
     { url: `https://api.notion.com/v1/databases/${uuid}/query`,    ver: '2022-06-28' },
     { url: `https://api.notion.com/v1/data_sources/${uuid}/query`, ver: '2025-09-03' },
   ];
+  if (esDataSource) attempts.reverse();
+
+  // ── Filtro por categoría (opcional): ?cat=Peliculas[&prop=Categoria]
+  //    Notion filtra de su lado y devuelve solo esas filas → muchas menos páginas.
+  //    Se prueba como select; si la columna es multi-select, se reintenta así.
+  const cat  = String(req.query.cat  || '').trim();
+  const prop = String(req.query.prop || 'Categoria').trim();
+  const filtros = cat
+    ? [{ property: prop, select: { equals: cat } },
+       { property: prop, multi_select: { contains: cat } }]
+    : [null];
 
   let lastErr = null;
   for (const a of attempts) {
+   for (const filtro of filtros) {
     try {
       // ── Paginación completa: recorre TODA la base, no solo las primeras 100 filas.
       //    Notion entrega máx. 100 por request; se sigue el cursor mientras has_more sea true.
@@ -83,8 +98,9 @@ export default async function handler(req, res) {
 
         const body = { page_size: 100 };
         if (cursor) body.start_cursor = cursor;
+        if (filtro) body.filter = filtro;
 
-        const r = await fetch(a.url, {
+        const pedir = () => fetch(a.url, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -93,6 +109,14 @@ export default async function handler(req, res) {
           },
           body: JSON.stringify(body),
         });
+        let r = await pedir();
+        // 429 = Notion pide bajar el ritmo. Esperamos lo que indica (máx 2 s)
+        // y reintentamos UNA vez esa misma página, en vez de cortar la lista.
+        if (r.status === 429) {
+          const espera = Math.min(2000, (Number(r.headers.get('retry-after')) || 1) * 1000);
+          await new Promise(ok => setTimeout(ok, espera));
+          r = await pedir();
+        }
         const data = await r.json();
 
         if (!r.ok) {
@@ -121,23 +145,31 @@ export default async function handler(req, res) {
       if (okFormat) {
         // Cache en el CDN de Vercel: la primera consulta paga el costo, las
         // siguientes salen al instante. Agrega &fresh=1 para saltarse la cache.
-        res.setHeader('Cache-Control', req.query.fresh !== undefined
+        // Una lista PARCIAL nunca se cachea: si no, el CDN serviría el mismo
+        // pedazo truncado durante horas y el sorteo saldría siempre del mismo grupo.
+        res.setHeader('Cache-Control', (req.query.fresh !== undefined || parcial)
           ? 'no-store'
           : 's-maxage=3600, stale-while-revalidate=86400');
         return res.status(200).json({
           items: results,
           source: a.ver,
+          filtro: filtro ? { prop, cat } : null,
           count: results.length,
           parcial,                       // true = la lista NO esta completa
           motivo,                        // por que se corto
           ms: Date.now() - T0,
         });
       }
-      // si es "no encontrado", prueba el siguiente formato; si es auth/otro, corta
-      if (lastErr?.code && lastErr.code !== 'object_not_found') break;
+      // validation_error con filtro = la columna no es de ese tipo → probar el siguiente filtro
+      if (filtro && lastErr?.code === 'validation_error') continue;
+      break; // salir del loop de filtros y decidir si probar el otro formato
     } catch (e) {
       lastErr = { message: e.message };
+      break;
     }
+   }
+   // si es "no encontrado", prueba el siguiente formato; si es auth/otro, corta
+   if (lastErr?.code && lastErr.code !== 'object_not_found') break;
   }
   return res.status(lastErr?.status || 502).json({
     error: lastErr?.message || 'No se pudo consultar Notion',
